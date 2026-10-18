@@ -1,0 +1,296 @@
+先说结论
+写一个 Minecraft 模组加载器，不是“做一个插件”，而是做一套“启动器 + 类加载器 + 字节码转换 + 模组生命周期管理”系统。
+如果你想真正落地，最现实的路线是：
+
+先选一个目标模型
+
+Fabric 风格：轻量、类加载和 Mixin 为核心
+Forge 风格：重型、完整生命周期和 patch 机制
+自定义轻量版：只支持最基础的 mod 加载
+先实现最小可运行版本
+
+启动入口
+mod 扫描
+classloader
+lifecycle
+最简事件系统
+慢慢加入字节码转换和兼容层
+
+ASM / Mixin
+访问转换
+资源注入
+一、先决定你要做哪一种“加载器”
+这一步非常重要，因为 Fabric 和 Forge 的设计方向完全不同。
+
+1) Fabric 型
+适合做“轻型加载器”：
+
+入口简单
+依赖 Mixin / intermediary
+classloader 管理比较清晰
+更适合从零学术研究和小型项目
+优点：
+
+架构相对清晰
+更容易理解本质
+缺点：
+
+需要处理 Mixin 和 class transformer
+兼容性依赖模块设计较严谨
+2) Forge 型
+更像“完整游戏框架”：
+
+需要支持更重的启动过程
+需要模组事件系统、资源管理、访问转换
+更复杂，但生态更成熟
+3) 自定义极简型
+目标是“能加载一个 mod”，不是“实现完整 MC 模组生态”。
+
+适合：
+
+研究
+教学
+原型设计
+不适合：
+
+直接做生产级模组加载器
+二、最小架构：一个加载器至少需要这 5 层
+1. 启动入口
+启动器需要替换标准 main 入口，像这样：
+
+Minecraft 启动时不直接走原版 Main
+而是走你自己的 LoaderMain
+然后再决定：
+加载游戏本体
+加载模组
+初始化环境
+也就是说，你需要一个“替代入口”，通常是：
+
+一个自定义 mainClass
+一个启动配置文件
+一个 launcher profile
+2. Mod 发现机制
+你需要扫描某个目录，比如：
+
+mods/
+mods/*.jar
+然后读取每个 mod 的元数据，比如：
+
+mod id
+mod name
+version
+entry class
+依赖关系
+混入配置
+最简单的方式：
+
+约定一个 mod.json
+每个 jar 里都有这个文件
+启动时扫描并解析
+例如：
+
+modId
+name
+version
+main
+depends
+3. 类加载器
+这是加载器最核心的部分。
+
+你需要一个自定义类加载器，用来：
+
+加载游戏本体
+加载模组 jar
+分开隔离游戏类和模组类
+处理依赖冲突
+核心思路：
+
+父加载器：Minecraft 本体和标准库
+子加载器：每个模组或一组模组
+运行时控制：
+先委托父类
+或者优先加载模组类
+你至少要掌握：
+
+URLClassLoader
+child-first / parent-first
+分层加载
+资源加载
+这是“加载器”最本质的部分。
+
+4. 生命周期系统
+一个模组不是单纯“类能被加载”，还要有生命周期。
+
+通常至少需要这些阶段：
+
+preInit
+init
+postInit
+shutdown
+例如：
+
+读取配置
+注册事件
+注入逻辑
+结束时清理资源
+这部分可以使用：
+
+自定义事件总线
+反射调用入口类
+标准接口约定
+比如：
+
+ModInitializer
+ClientModInitializer
+LifecycleEvent
+5. 字节码转换层
+这是真正复杂的地方。
+
+为什么需要它？
+
+因为模组往往需要修改 Minecraft 原本的类
+例如：改事件、改方法、插入钩子、改字段访问
+通常用：
+
+ASM
+Mixin
+最简单的做法：
+
+不做复杂转换，先做“反射 + 接口 + 事件监听”
+比较稳定
+适合学习和原型
+如果你想做更像 Fabric 的加载器，就要做：
+
+class transformer
+bytecode rewrite
+mixin application
+三、真正的执行流程大概是这样
+启动时
+启动器读取配置
+扫描 mods/
+解析每个 mod.json
+生成 mod 列表
+创建自定义 classloader
+加载模组入口类
+调用生命周期方法
+游戏主循环继续执行
+四、最基础的类结构你可以这样设计
+一个简化版加载器通常有这些类：
+
+Loader
+负责总入口
+ModContainer
+一个 mod 的封装对象
+ModMetadata
+读取 mod 信息
+ModClassLoader
+自定义 classloader
+ModManager
+发现和加载 mod
+LifecycleManager
+控制 init / shutdown
+TransformerManager
+处理字节码修改
+EventBus
+事件分发
+五、你最早需要解决的 3 个核心问题
+问题 1：怎么让 Minecraft 启动时加载你的 loader
+答案：
+
+通过启动参数或版本配置
+替换 mainClass
+问题 2：怎么让 mod 类被加载
+答案：
+
+自定义 classloader
+扫描 jar
+URLClassLoader 或自定义实现
+问题 3：怎么让 mod 和 Minecraft 交互
+答案：
+
+统一事件总线
+反射入口
+接口约定
+如果需要更深层集成，就用 bytecode transformation
+六、推荐的学习顺序
+第 1 步：做一个最小版本
+目标：
+
+扫描 mods
+加载 mod.json
+反射调用 onLoad()
+完成最基本的启动
+第 2 步：加入 classloader
+目标：
+
+让 mod 依赖自己加载
+能在运行时访问某些类
+解决类冲突
+第 3 步：加入事件系统
+目标：
+
+模组之间能相互通信
+不再靠硬编码调用
+第 4 步：加入字节码修改
+目标：
+
+让模组能挂钩 Minecraft 原生方法
+这时才接近真实加载器
+七、写这个项目最容易踩的坑
+1. 只想着“加载 mod”，没想“怎么加载依赖”
+很多人忽略了依赖解析，其实这是核心。
+
+2. classloader 设计不清
+如果不分层，很容易出现：
+
+NoClassDefFoundError
+ClassCastException
+版本冲突
+不同 mod 间互相污染
+3. 从一开始就做 Forge 级别
+这是最容易失败的路径。
+真正可行的方式是：
+
+先做一个最小可运行版
+再随着需求增长
+4. 直接上 ASM/Mixin
+对初学者非常痛苦。
+你应该先从：
+
+反射
+mod lifecycle
+classloader
+manifest
+开始
+八、如果你要真正做一个“像 Fabric 那样的加载器”，你需要的技术栈
+至少会用到这些：
+
+Java
+ASM 或 Mixin
+URLClassLoader / 自定义 class loader
+ZIP/JAR 处理
+JSON 解析
+反射
+事件分发模型
+Minecraft 的启动流程理解
+九、最现实的建议
+如果你的目标是“学会真正做加载器”，最好的路线其实不是一上来造一个完整 Forge：
+
+先写一个“最简单的 mod loader”
+能扫描 mods/
+能解析 mod.json
+能执行入口类
+能隔离 classloader
+再接入 Mixin / ASM
+这才是最合理的学习路径。
+
+一句话总结
+写一个 Minecraft 模组加载器，本质上是在做：
+
+启动入口替换
+mod 扫描与元数据解析
+自定义类加载
+生命周期管理
+可选的字节码转换和钩子注入
+这不是一个简单的“插件系统”，而是一整套运行时框架。
+如果你愿意，我下一步可以直接给你一份“最小可运行 Minecraft 模组加载器”设计稿，包含类结构、伪代码和启动流程。
